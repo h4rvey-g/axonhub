@@ -6,6 +6,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v1.0.0)'
+        required: true
+        type: string
 
 jobs:
   build_single_arch:
@@ -35,7 +41,15 @@ jobs:
       - name: Resolve tag & write VERSION
         run: |
           git fetch --tags --force --depth=1
-          TAG=${GITHUB_REF#refs/tags/}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+              echo "Error: tag '$TAG' does not match the expected format (e.g. v1.0.0)" >&2
+              exit 1
+            fi
+          else
+            TAG=${GITHUB_REF#refs/tags/}
+          fi
           echo "TAG=$TAG" >> $GITHUB_ENV
           echo "$TAG" > internal/build/VERSION
           echo "Building tag: $TAG for ${{ matrix.arch }}"
@@ -76,7 +90,7 @@ jobs:
     name: Create multi-arch manifests (GHCR)
     needs: [build_single_arch]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
 
     permissions:
       packages: write
@@ -84,7 +98,17 @@ jobs:
 
     steps:
       - name: Extract tag
-        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+              echo "Error: tag '$TAG' does not match the expected format (e.g. v1.0.0)" >&2
+              exit 1
+            fi
+            echo "TAG=$TAG" >> $GITHUB_ENV
+          else
+            echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          fi
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
